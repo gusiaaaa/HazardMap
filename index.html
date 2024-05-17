@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>渥美半島津波ハザードマップ</title>
+        <script src="https://unpkg.com/maplibre-gl@^3.0/dist/maplibre-gl.js"></script>
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/maplibre-gl@^3.0/dist/maplibre-gl.css"
+        />
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+            }
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map" style="height: 100vh"></div>
+        <div class="absolute left-4 top-4 bg-white p-2 rounded-md w-80">
+            <p class="text-xl font-bold">渥美半島津波ハザードマップ</p>
+            <p>
+                このWebサイトは2024年5月に実施したMIERUNEインターンにて作成した習作です
+            </p>
+        </div>
+        <div class="absolute left-4 bottom-4 p-4 bg-white rounded-md">
+            <button id="legend-toggle">▶︎凡例</button>
+            <img
+                id="legend-image"
+                style="display: none"
+                src="./imgs/hanrei.png"
+            />
+        </div>
+        <script>
+            const map = new maplibregl.Map({
+                container: 'map', // container id
+                style: {
+                    version: 8,
+                    sources: {
+                        osm: {
+                            type: 'raster',
+                            tiles: [
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            ],
+                            tileSize: 256,
+                            attribution:
+                                '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                        },
+                        raster: {
+                            type: 'raster',
+                            tiles: ['./tiles/{z}/{x}/{y}.png'],
+                            tileSize: 256,
+                            maxzoom: 17,
+                            bounds: [
+                                136.96715, // 左下
+                                34.52906, // 左下
+                                137.54678, // 右上
+                                34.80189, // 右上
+                            ],
+                            attribution:
+                                '<a href="https://www.gsi.go.jp/bousaichiri/hinanbasho.html">指定緊急避難場所（国土地理院）</a> | <a href="https://nlftp.mlit.go.jp/ksj/">国土数値情報（津波浸水想定ポリゴン・土砂災害警戒区域）</a>',
+                        },
+                        gsidem: {
+                            type: 'raster-dem',
+                            tiles: [
+                                'gsidem://https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png',
+                            ],
+                            tileSize: 256,
+                            maxzoom: 14,
+                        },
+                    },
+                    layers: [
+                        {
+                            id: 'osm',
+                            type: 'raster',
+                            source: 'osm',
+                        },
+                        {
+                            id: 'raster',
+                            type: 'raster',
+                            source: 'raster',
+                        },
+                        {
+                            id: 'gsidem',
+                            type: 'hillshade',
+                            source: 'gsidem',
+                            paint: {
+                                'hillshade-exaggeration': 0.3,
+                            },
+                        },
+                    ],
+                    terrain: {
+                        source: 'gsidem',
+                        exaggeration: 1.0,
+                    },
+                },
+                center: [137.1663, 34.6303],
+                zoom: 11,
+                pitch: 50,
+                maxPitch: 60,
+                maxZoom: 18,
+                maxBounds: [
+                    [136.96715, 34.52906], // 左下
+                    [137.54678, 34.80189], // 右上
+                ],
+            });
+            map.addControl(new maplibregl.NavigationControl());
+            map.addControl(new maplibregl.GeolocateControl());
+
+            // 凡例の表示切り替え
+            const legendToggle = document.getElementById('legend-toggle');
+            const legendImg = document.getElementById('legend-image');
+            legendToggle.onclick = () => {
+                const willShow = legendImg.style.display === 'none';
+                legendImg.style.display = willShow ? 'block' : 'none';
+                legendToggle.innerText = willShow ? '▼凡例' : '▶︎凡例';
+            };
+
+            // 3D地形表現: 関数
+            const gsidem2terrainrgb = (r, g, b) => {
+                let height = r * 655.36 + g * 2.56 + b * 0.01;
+                if (r === 128 && g === 0 && b === 0) {
+                    height = 0;
+                } else if (r >= 128) {
+                    height -= 167772.16;
+                }
+                height += 100000;
+                height *= 10;
+                const tB = (height / 256 - Math.floor(height / 256)) * 256;
+                const tG =
+                    (Math.floor(height / 256) / 256 -
+                        Math.floor(Math.floor(height / 256) / 256)) *
+                    256;
+                const tR =
+                    (Math.floor(Math.floor(height / 256) / 256) / 256 -
+                        Math.floor(
+                            Math.floor(Math.floor(height / 256) / 256) / 256,
+                        )) *
+                    256;
+                return [tR, tG, tB];
+            };
+            // 3D地形表現: MapLibre側の処理
+            // https://qiita.com/Kanahiro/items/1e9c1a4ad6be76b27f0f
+            maplibregl.addProtocol('gsidem', (params, callback) => {
+                const image = new Image();
+                image.crossOrigin = '';
+                image.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = image.width;
+                    canvas.height = image.height;
+
+                    const context = canvas.getContext('2d');
+                    context.drawImage(image, 0, 0);
+                    const imageData = context.getImageData(
+                        0,
+                        0,
+                        canvas.width,
+                        canvas.height,
+                    );
+                    for (let i = 0; i < imageData.data.length / 4; i++) {
+                        const tRGB = gsidem2terrainrgb(
+                            imageData.data[i * 4],
+                            imageData.data[i * 4 + 1],
+                            imageData.data[i * 4 + 2],
+                        );
+                        imageData.data[i * 4] = tRGB[0];
+                        imageData.data[i * 4 + 1] = tRGB[1];
+                        imageData.data[i * 4 + 2] = tRGB[2];
+                    }
+                    context.putImageData(imageData, 0, 0);
+                    canvas.toBlob((blob) =>
+                        blob
+                            .arrayBuffer()
+                            .then((arr) => callback(null, arr, null, null)),
+                    );
+                };
+                image.src = params.url.replace('gsidem://', '');
+                return { cancel: () => {} };
+            });
+        </script>
+    </body>
+</html>
